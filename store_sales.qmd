@@ -5,7 +5,7 @@ format:
   dashboard:
     theme: yeti
     embed-resources: true
-    code-background: true
+    code: true
 execute: 
   echo: false
 ---
