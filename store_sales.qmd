@@ -6,10 +6,9 @@ format:
     theme: yeti
   html:
     embed-resources: true
-    code: true
+    code-background: true
 execute: 
   echo: false
-editor: visual
 ---
 
 ```{r}
