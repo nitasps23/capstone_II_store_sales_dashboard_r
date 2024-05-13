@@ -4,10 +4,8 @@ author: "Nita Sokphoodsa"
 format:
   dashboard:
     theme: yeti
-    html:
-      embed-resources: true
-      self-contained: true
-      code: true
+    embed-resources: true
+    self-contained-math: true
 execute: 
   echo: false
 ---
