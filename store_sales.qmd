@@ -4,7 +4,6 @@ author: "Nita Sokphoodsa"
 format:
   dashboard:
     theme: yeti
-  html:
     embed-resources: true
     code-background: true
 execute: 
