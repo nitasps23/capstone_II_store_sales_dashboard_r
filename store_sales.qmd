@@ -1,0 +1,1618 @@
+---
+title: "Store Sales Dashboard"
+author: "Nita Sokphoodsa"
+format:
+  dashboard:
+    theme: yeti
+execute: 
+  echo: false
+editor: visual
+---
+
+```{r}
+#| output: false
+#| message: false
+#| warning: false
+#| label: LIBRARIES AND SETUP
+
+# Setup and preparation
+library(dplyr)
+library(dygraphs)
+library(DT)
+library(ggplot2)
+library(ggthemes)
+library(ggpubr)
+library(gmodels)
+library(gt)
+library(hrbrthemes)
+library(janitor)
+library(leaflet)
+library(maps)
+library(plotly)
+library(sf)
+library(scales)
+library(tidyr)
+library(tidyverse)
+library(viridis)
+library(webr)
+library(wesanderson)
+library(xts)
+library(zipcodeR)
+data("zip_code_db")
+```
+
+```{r}
+#| output: false
+#| label: IMPORT, CHECK, TIDY DATA
+# read in data
+sales <- read.csv("data/store_sales.csv")
+View(sales)
+# check data
+glimpse(sales)
+names(sales)
+sum(is.na(sales))
+# convert Order.Date to Date
+sales$Order.Date <- as.Date(sales$Order.Date, "%m/%d/%Y")
+class(sales$Order.Date)
+# convert Ship.Date to Date
+sales$Ship.Date <- as.Date(sales$Ship.Date, "%m/%d/%Y")
+class(sales$Ship.Date)
+# convert Postal.Code to Character
+sales$Postal.Code <- as.character(sales$Postal.Code)
+class(sales$Postal.Code)
+# convert Ship.Mode to factor
+sales$Ship.Mode <- factor(sales$Ship.Mode, levels = c("Same Day", "First Class", "Second Class", "Standard Class"))
+unique(sales$Ship.Mode)
+# convert customer segment to factor
+sales$Segment <- factor(sales$Segment, levels = c("Consumer", "Home Office", "Corporate"))
+unique(sales$Segment)
+
+```
+
+# Sales & Profit
+
+```{r}
+#| output: false
+#| label: EXPLORE CHUNK - SALES & PROFIT
+
+# look at Sales
+sum(is.na(sales$Order.ID))
+summary(sales$Sales)
+sum(sales$Sales)
+# Avg sales per order
+data <- sales |>
+  group_by(Order.ID) |>
+  summarise(sum(Sales))
+AvgSalesPerOrder <- mean(data$`sum(Sales)`)
+# Avg sales per customer
+data <- sales |>
+  group_by(Customer.ID) |>
+  summarise(sum(Sales))
+AvgSalesPerCustomer <- mean(data$`sum(Sales)`)
+# Avg sales per product
+data <- sales |>
+  group_by(Product.Name) |>
+  summarise(sum(Sales))
+AvgSalesPerProduct <- mean(data$`sum(Sales)`)
+# Avg yearly sales
+data <- sales |>
+  mutate(year = format(Order.Date, "%Y")) |>
+  group_by(year) |>
+  summarise(sum(Sales))
+AvgYearlySales <- mean(data$`sum(Sales)`)
+# Avg monthly sales
+data <- sales |>
+  mutate(
+    year = format(Order.Date, "%Y"),
+    month = format(Order.Date, "%m")
+    ) |>
+  group_by(year, month) |>
+  summarise(sum(Sales))
+AvgMonthlySales <- mean(data$`sum(Sales)`)
+                         
+# look at Quantity
+sum(is.na(sales$Quantity))
+summary(sales$Quantity)
+sum(sales$Quantity)
+
+# look at Discount
+sum(is.na(sales$Discount))
+summary(sales$Discount)
+sum(sales$Discount)
+# Avg yearly Discount
+data <- sales |>
+  mutate(year = format(Order.Date, "%Y")) |>
+  group_by(year) |>
+  summarise(sum(Discount))
+AvgYearlyDiscount <- mean(data$`sum(Discount)`)
+# Avg monthly Discount
+data <- sales |>
+  mutate(
+    year = format(Order.Date, "%Y"),
+    month = format(Order.Date, "%m")
+    ) |>
+  group_by(year, month) |>
+  summarise(sum(Discount))
+AvgMonthlyDiscount <- mean(data$`sum(Discount)`)
+
+# look at Profit
+sum(is.na(sales$Profit))
+summary(sales$Profit)
+sum(sales$Profit)
+# Avg yearly Profit
+data <- sales |>
+  mutate(year = format(Order.Date, "%Y")) |>
+  group_by(year) |>
+  summarise(sum(Profit))
+AvgYearlyProfit <- mean(data$`sum(Profit)`)
+# Avg monthly Profit
+data <- sales |>
+  mutate(
+    year = format(Order.Date, "%Y"),
+    month = format(Order.Date, "%m")
+    ) |>
+  group_by(year, month) |>
+  summarise(sum(Profit))
+AvgMonthlyProfit <- mean(data$`sum(Profit)`)
+
+# profit margin
+ProfitMargin <- sum(sales$Profit) / sum(sales$Sales)
+
+# Top 10 Value Customers (by Sales) - NOT USING
+ggplotly(sales |>
+  group_by(Customer.Name) |>
+  summarise(TotalSales = sum(Sales)) |>
+  mutate(Customer.Name = fct_reorder(Customer.Name, TotalSales, .desc = TRUE)) |>
+  top_n(10, TotalSales) |>
+  ggplot(aes(x= TotalSales, y= Customer.Name)) +
+  geom_col(fill= viridis(10)) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.1))) +
+  scale_y_discrete(limits = rev) +
+  theme_minimal())
+
+# Top 10 Value PRODUCT (by Sales) - NOT USING
+ggplotly(sales |>
+  group_by(Product.Name) |>
+  summarise(TotalSales = sum(Sales)) |>
+  mutate(Product.Name = fct_reorder(Product.Name, TotalSales, .desc = TRUE)) |>
+  top_n(10, TotalSales) |>
+  ggplot(aes(x= TotalSales, y= Product.Name)) +
+  geom_col(fill= viridis(10)) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.1))) +
+  scale_y_discrete(limits = rev) +
+  theme_minimal())
+
+# make bar plot - Region w Sales
+data <- sales |>
+  group_by(Region) |>
+  summarise(TotalSales = sum(Sales)) |>
+  arrange(desc(TotalSales))
+ggplotly(data |>
+  ggplot(aes(x= reorder(Region, -TotalSales), y= TotalSales)) +
+  geom_col(fill= viridis(4)) +
+  theme_minimal())
+
+
+# "Year over Year Sales Growth"
+sales |>
+  mutate(
+    Year = format(Order.Date, "%Y"),
+    Month = format(Order.Date, "%m")) |>
+  group_by(Year, Month) |>
+  summarise(TotalSales = sum(Sales)) |>
+  plot_ly(x= ~Month, y= ~TotalSales, color= ~Year, mode= "lines", type = "scatter")
+
+# "Year over Year Profit Trends"
+sales |>
+  mutate(
+    Year = format(Order.Date, "%Y"),
+    Month = format(Order.Date, "%m")) |>
+  group_by(Year, Month) |>
+  summarise(TotalProfit = sum(Profit)) |>
+  plot_ly(x= ~Month, y= ~TotalProfit, color= ~Year, mode= "bar")
+```
+
+
+## Row {.flow}
+
+```{r}
+#| content: valuebox
+#| title: "Total Sales"
+#| label: VALUE BOXES - SALES & PROFIT 1
+
+list(
+  color= "success",
+  value= paste0("$",format(round(sum(sales$Sales)), big.mark = ","))
+)
+```
+```{r}
+#| content: valuebox
+#| title: "Total Profit"
+#| label: VALUE BOXES - SALES & PROFIT 2
+
+list(
+  color= "teal",
+  value= paste0("$", format(round(sum(sales$Profit)), big.mark = ","))
+)
+```
+```{r}
+#| content: valuebox
+#| title: "Profit Margin"
+#| label: VALUE BOXES - SALES & PROFIT 3
+
+list(
+  color= "teal",
+  value= paste0(round(ProfitMargin * 100, 1), "%")
+)
+```
+
+```{r}
+#| content: valuebox
+#| title: "Total Discount"
+#| label: VALUE BOXES - SALES & PROFIT 4
+
+list(
+  color= "primary",
+  value= paste0("$", format(round(sum(sales$Discount)), big.mark = ","))
+)
+```
+```{r}
+#| content: valuebox
+#| title: "Avg. Sales per Order"
+#| label: VALUE BOXES - SALES & PROFIT 5
+
+list(
+  color= "info",
+  value= paste0("$", round(AvgSalesPerOrder))
+)
+```
+```{r}
+#| content: valuebox
+#| title: "Avg. Sales per Customer"
+#| label: VALUE BOXES - SALES & PROFIT 6
+
+list(
+  color= "info",
+  value= paste0("$", format(round(AvgSalesPerCustomer), big.mark = ","))
+)
+```
+```{r}
+#| content: valuebox
+#| title: "Avg. Sales per Product"
+#| label: VALUE BOXES - SALES & PROFIT 7
+
+list(
+  color= "info",
+  value= paste0("$", format(round(AvgSalesPerProduct), big.mark = ","))
+)
+```
+
+
+## Row {.flow}
+
+### Column {.tabset}
+```{r}
+#| title: "Year over Year Sales Trend"
+#| padding: 0px
+#| label: SALES & PROFIT - LINE CHART - SALES
+
+data <- sales |>
+  mutate(YearMonth = format(Order.Date, "%Y-%m-1")) |>
+  group_by(YearMonth) |>
+  summarise(TotalSales = sum(Sales)) |>
+  mutate(YearMonth = as.Date(YearMonth))
+
+#Make plot for per month
+mthData <- xts(x = data$TotalSales, order.by = data$YearMonth)
+dygraph(mthData) |>
+  dyOptions(drawPoints = TRUE, pointSize = 4, fillGraph=TRUE) |>
+  dyRangeSelector(strokeColor = "darkred", fillColor = "darkred") |>
+  dyLegend(show = "always", hideOnMouseOut = FALSE) |>
+  dySeries("V1", label = "Total Sales")
+
+
+```
+
+```{r}
+#| title: "YoY Profit Trend"
+#| padding: 0px
+#| label: SALES & PROFIT - LINE CHART - PROFIT
+
+data <- sales |>
+  mutate(YearMonth = format(Order.Date, "%Y-%m-1")) |>
+  group_by(YearMonth) |>
+  summarise(TotalProfit = sum(Profit)) |>
+  mutate(YearMonth = as.Date(YearMonth))
+
+#Make plot for per month
+mthData <- xts(x = data$TotalProfit, order.by = data$YearMonth)
+dygraph(mthData) |>
+  dyOptions(drawPoints = TRUE, pointSize = 4, fillGraph=TRUE) |>
+  dyRangeSelector(strokeColor = "darkred", fillColor = "darkred") |>
+  dyLegend(show = "always", hideOnMouseOut = FALSE) |>
+  dySeries("V1", label = "Total Profit")
+
+```
+
+```{r}
+#| title: "YoY Profit Margin %"
+#| padding: 0px
+#| label: SALES & PROFIT - LINE CHART - PROFIT MARGIN
+
+data <- sales |>
+  mutate(YearMonth = format(Order.Date, "%Y-%m-1")) |>
+  group_by(YearMonth) |>
+  summarise(ProfitMargin = round(sum(Profit) / sum(Sales) * 100, 2))  |>
+  mutate(YearMonth = as.Date(YearMonth)) 
+
+#Make plot for per month
+mthData <- xts(x = data$ProfitMargin, order.by = data$YearMonth)
+dygraph(mthData) |>
+  dyOptions(drawPoints = TRUE, pointSize = 4, fillGraph=TRUE) |>
+  dyRangeSelector(strokeColor = "darkred", fillColor = "darkred") |>
+  dyLegend(show = "always", hideOnMouseOut = FALSE) |>
+  dySeries("V1", label = "Profit Margin %")
+
+
+  
+```
+
+
+## Row {height=55%}
+
+### Column {.tabset}
+
+```{r}
+#| title: "Sales by Geography"
+#| padding: 0px
+#| label: SALES & PROFIT - MAP
+data <- data.frame(sales |>
+  group_by(State) |>
+  summarise(TotalSales = sum(Sales))) |>
+  mutate(State = tolower(State))
+states_map <- map_data("state")
+
+ggplotly(ggplot(data, aes(map_id= State, fill= TotalSales)) +
+  geom_map(map = states_map, colour= "black") +
+  expand_limits(x= states_map$long, y=states_map$lat) +
+  scale_fill_viridis_c()+
+    theme_map())
+```
+
+```{r}
+#| title: "Sales by Region"
+#| padding: 0px
+#| label: SALES & PROFIT - BAR PLOT - REGION
+# make donut plot - Region w Sales
+sales |>
+  group_by(Region) |>
+  summarise(TotalSales = sum(Sales)) |>
+  arrange(desc(TotalSales)) |>
+  plot_ly() |>
+  add_pie(labels = ~factor(Region), values = ~TotalSales,
+          textinfo= "label+value+percent", type= "pie", 
+          texttemplate= "%{label} <br> $%{value:,.0f} <br> %{percent}",
+          hole= 0.6, marker= list(colors= viridis(3))
+          #textfont= list(size= 15)
+  )
+```
+```{r}
+#| title: "Top 10 Cities (by Sales)"
+#| padding: 0px
+#| label: SALES & PROFIT - BAR PLOT - CITY
+
+ggplotly(sales |>
+  group_by(City) |>
+  summarise(TotalSales = sum(Sales)) |>
+  mutate(City = fct_reorder(City, TotalSales, .desc = TRUE)) |>
+  top_n(10, TotalSales) |>
+  ggplot(aes(x= TotalSales, y= City)) +
+  geom_col(fill= viridis(10)) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.1))) +
+  scale_y_discrete(limits = rev) +
+  theme_minimal())
+```
+
+
+### Column {.tabset}
+```{r}
+#| title: "Top 10 Value Customers (by Sales)"
+#| padding: 0px
+#| label: SALES & PROFIT - TABLE - CUSTOMERS
+
+# Top 10 Value Customers (by Sales)
+sales |>
+  group_by(Customer.Name, Customer.ID, Segment) |>
+  summarise(TotalSales = sum(Sales)) |>
+  ungroup() |>
+  arrange(desc(TotalSales)) |>
+  top_n(10, TotalSales) |>
+  mutate(TotalSales = dollar(TotalSales, largest_with_cents = 0)) |>
+  knitr::kable()
+  
+```
+
+
+```{r}
+#| title: "Top 10 Products (by Sales)"
+#| padding: 0px
+#| label: SALES & PROFIT - TABLE - PRODUCTS
+
+sales |>
+  group_by(Product.Name, Sub.Category) |>
+  summarise(TotalSales = sum(Sales)) |>
+  ungroup() |>
+  arrange(desc(TotalSales)) |>
+  top_n(10, TotalSales) |>
+  mutate(TotalSales = dollar(TotalSales, largest_with_cents = 0)) |>
+  knitr::kable()
+```
+
+
+
+# Orders & Shipping
+
+```{r}
+#| output: false
+#| label: EXPLORE CHUNK - ORDERS & SHIPPING
+
+# explore order ID
+sum(is.na(sales$Order.ID))
+sum(duplicated(sales$Order.ID))
+TotalOrders <- length(unique(sales$Order.ID))
+
+# explore Order.Date & Ship.Date
+# convert character to date
+# Order.Date
+sum(is.na(sales$Order.Date))
+# Ship.Date
+sum(is.na(sales$Ship.Date))
+
+# how many days had the business been operated?
+min(sales$Order.Date)
+max(sales$Order.Date)
+days_in_business <- as.numeric(difftime(max(sales$Order.Date), min(sales$Order.Date), units= "days"))
+days_in_business
+years_in_business <- round(as.numeric(days_in_business / 365, 2),2)
+years_in_business
+
+# create Days.to.Ship
+sales$Days.to.Ship <- as.numeric(difftime(sales$Ship.Date, sales$Order.Date, units= "days"))
+AvgShippingDays <- mean(sales$Days.to.Ship)
+
+# Avg orders per month
+data <- sales |>
+  mutate(
+    year = format(Order.Date, "%Y"),
+    month = format(Order.Date, "%m")
+    ) |>
+  group_by(year, month) |>
+  summarise(Num.Orders = length(unique(Order.ID)))
+
+AvgMonthlyOrders <- mean(data$Num.Orders)
+
+# Avg orders per year
+data <- sales |>
+  mutate(
+    year = format(Order.Date, "%Y")
+    ) |>
+  group_by(year) |>
+  summarise(Num.Orders = length(unique(Order.ID)))
+
+AvgYearlyOrders <- mean(data$Num.Orders)
+
+# Avg orders per day
+data <- sales |>
+  group_by(Order.Date) |>
+  summarise(Num.Orders = length(unique(Order.ID)))
+data
+AvgDailyOrders <- mean(data$Num.Orders)
+
+# select only unique order.ID (since there're duplicated order lines from multiple items in one order)
+Orders.Shipping <- sales |>
+  distinct(Order.ID, Order.Date, Ship.Date, Ship.Mode, Days.to.Ship)
+Orders.Shipping
+summary(Orders.Shipping$Days.to.Ship)
+
+# histograms of Days.to.Ship
+Orders.Shipping |>
+  ggplot(aes(x= Days.to.Ship)) +
+  geom_histogram(alpha= 1, binwidth = 1, color= "#e9ecef") +
+  scale_fill_brewer(palette="Set1") +
+  theme_ipsum() +
+  stat_bin(binwidth=1, geom='text', color='white', size=4,
+           aes(label=..count..), position=position_stack(vjust=0.8))
+
+# explore Ship.Mode
+sum(is.na(Orders.Shipping$Ship.Mode))
+unique(Orders.Shipping$Ship.Mode)
+
+
+# donut plot - Ship.Mode
+data <- Orders.Shipping |>
+  count(Ship.Mode)
+data$fraction <- data$n / sum(data$n) # Compute percentages
+data$ymax <- cumsum(data$fraction) # Compute the cumulative percentages (top of each rectangle)
+data$ymin <- c(0, head(data$ymax, n=-1)) # Compute the bottom of each rectangle
+data$labelPosition <- (data$ymax + data$ymin) / 2 # Compute label position
+data$label <- paste0(data$Ship.Mode, "\n", format(data$n, big.mark = ","), " (", round(data$fraction * 100, digits = 2), "%)") # Compute a good label
+# Make the plot
+ggplot(data, aes(ymax=ymax, ymin=ymin, xmax=4, xmin=3, fill=Ship.Mode)) +
+  geom_rect() +
+  geom_label(x=3.5, aes(y=labelPosition, label=label), size=2.9) +
+  scale_fill_brewer(palette="Set3") +
+  coord_polar(theta="y") +
+  xlim(c(2, 4)) +
+  theme_void() +
+  theme(legend.position = "none")
+
+# look at Ship.Mode vs Days.to.Ship
+Orders.Shipping |>
+  tabyl(Ship.Mode, Days.to.Ship) |>
+  adorn_totals(where = c("row", "col")) |>
+  adorn_percentages() |>
+  adorn_pct_formatting(digits = 0) |>
+  adorn_ns() |>
+  gt()
+
+
+# histograms
+Orders.Shipping |>
+  ggplot(aes(x= Days.to.Ship, fill= Ship.Mode)) +
+  geom_histogram(color= "#e9ecef", alpha= 1, position= "stack", binwidth = 1) +
+  scale_fill_brewer(palette="PuBuGn") +
+  theme_minimal()
+  
+Orders.Shipping |>
+  ggplot(aes(x= Days.to.Ship, fill= Ship.Mode)) +
+  geom_histogram(color= "#e9ecef", alpha= 1, position= "stack", binwidth = 1) +
+  scale_fill_manual(values = wes_palette("Cavalcanti1", n = 4)) +
+  theme_minimal()
+
+```
+
+## Row {.flow}
+
+```{r}
+#| content: valuebox
+#| title: "Store Start Date"
+#| padding: 0px
+#| label: VALUE BOXES - ORDERS & SHIPPING 1
+
+list(
+  color= "success",
+  value= min(sales$Order.Date)
+)
+```
+```{r}
+#| content: valuebox
+#| title: "Days of Operation"
+#| padding: 0px
+#| label: VALUE BOXES - ORDERS & SHIPPING 2
+
+list(
+  color= "teal",
+  value= format(days_in_business, big.mark = ",")
+)
+```
+```{r}
+#| content: valuebox
+#| title: "Total Orders"
+#| padding: 0px
+#| label: VALUE BOXES - ORDERS & SHIPPING 3
+
+list(
+  color= "primary",
+  value= format(TotalOrders, big.mark = ",")
+)
+```
+```{r}
+#| content: valuebox
+#| title: "Avg. Orders /Year"
+#| padding: 0px
+#| label: VALUE BOXES - ORDERS & SHIPPING 4
+
+list(
+  color= "info",
+  value= AvgYearlyOrders
+)
+```
+```{r}
+#| content: valuebox
+#| title: "Avg. Orders /Month"
+#| padding: 0px
+#| label: VALUE BOXES - ORDERS & SHIPPING 5
+
+list(
+  color= "info",
+  value= round(AvgMonthlyOrders)
+)
+```
+```{r}
+#| content: valuebox
+#| title: "Avg. Orders /Day"
+#| padding: 0px
+#| label: VALUE BOXES - ORDERS & SHIPPING 6
+
+list(
+  color= "info",
+  value= round(AvgDailyOrders)
+)
+```
+```{r}
+#| content: valuebox
+#| title: "Avg. Shipping Days"
+#| padding: 0px
+#| label: VALUE BOXES - ORDERS & SHIPPING 7
+
+list(
+  color= "info",
+  value= round(AvgShippingDays)
+)
+```
+
+
+## Row
+
+### Column 
+
+```{r}
+#| title: "Shipping Modes by Number of Orders"
+#| padding: 0px
+#| label: ORDERS & SHIPPING - DONUT PLOT - SHIP MODE
+
+# make donut plot - Sub.Category w Quantity
+sales |>
+  distinct(Order.ID, Ship.Mode) |>
+  count(Ship.Mode) |>
+  plot_ly() |>
+  add_pie(labels = ~factor(Ship.Mode), values = ~n,
+          textinfo= "label+value+percent", type= "pie", 
+          texttemplate= "%{label} <br> %{value:,.0f} <br> %{percent}",
+          hole= 0.6, marker= list(colors= viridis(3))
+          #textfont= list(size= 15)
+  )
+```
+
+### Column {.tabset}
+
+```{r}
+#| title: "Frequency of Ship Mode by Customer Segment"
+#| padding: 0px
+#| label: ORDERS & SHIPPING - TILE CHART 1
+
+ggplotly(sales|>
+  distinct(Order.ID, Ship.Mode, Segment) |>
+  group_by(Ship.Mode, Segment) |>
+  summarise(NumOrders = length(unique(Order.ID))) |>
+  ungroup() |>
+  mutate(Percent_t = NumOrders / sum(NumOrders)) |>
+  ggplot(aes(Ship.Mode, Segment)) +
+  geom_tile(aes(fill= NumOrders)) +
+  geom_text(aes(label= paste0(NumOrders, '\n (', round(Percent_t * 100),'%)'))) +
+  scale_fill_gradient(low = "white", high = "#218581") +
+  theme_minimal()
+)
+```
+
+```{r}
+#| title: "by Product Category"
+#| padding: 0px
+#| label: ORDERS & SHIPPING - TILE CHART 2
+
+ggplotly(sales|>
+  distinct(Order.ID, Ship.Mode, Sub.Category) |>
+  group_by(Ship.Mode, Sub.Category) |>
+  summarise(NumOrders = length(unique(Order.ID))) |>
+  ungroup() |>
+  mutate(Percent_t = NumOrders / sum(NumOrders)) |>
+  ggplot(aes(Ship.Mode, Sub.Category)) +
+  geom_tile(aes(fill= NumOrders)) +
+  geom_text(aes(label= paste0(NumOrders, '\n (', round(Percent_t * 100),'%)'))) +
+  scale_fill_gradient(low = "white", high = "#218581") +
+  theme_minimal()
+)
+
+```
+```{r}
+#| title: "by Region"
+#| padding: 0px
+#| label: ORDERS & SHIPPING - TILE CHART 3
+
+ggplotly(sales|>
+  distinct(Order.ID, Ship.Mode, Region) |>
+  group_by(Ship.Mode, Region) |>
+  summarise(NumOrders = length(unique(Order.ID))) |>
+  ungroup() |>
+  mutate(Percent_t = NumOrders / sum(NumOrders)) |>
+  ggplot(aes(Ship.Mode, Region)) +
+  geom_tile(aes(fill= NumOrders)) +
+  geom_text(aes(label= paste0(NumOrders, '\n (', round(Percent_t * 100),'%)'))) +
+  scale_fill_gradient(low = "white", high = "#218581") +
+  theme_minimal()
+)
+
+
+data <- sales|>
+  distinct(Order.ID, Ship.Mode, Region) |>
+  group_by(Ship.Mode, Region) |>
+  summarise(NumOrders = length(unique(Order.ID))) |>
+  ungroup() |>
+  mutate(Percent_t = NumOrders / sum(NumOrders))
+```
+
+## Row
+
+### Column {.tabset}
+
+
+```{r}
+#| title: "Days to Ship (DTS) by Number of Orders"
+#| padding: 0px
+#| label: ORDERS & SHIPPING - BAR PLOT - DAYS TO SHIP
+
+ggplotly(sales |>
+  distinct(Order.ID, Days.to.Ship) |>
+  ggplot(aes(x= Days.to.Ship)) +
+  geom_histogram(alpha= 1, binwidth = 1, color= "#e9ecef", fill= viridis(1)) +
+    coord_flip() +
+  theme_minimal() +
+  stat_bin(binwidth=1, geom='text', color='white', size=4,
+           aes(label=..count..), position=position_stack(vjust=0.8))
+)
+```
+
+
+```{r}
+#| title: "DTS by Ship Modes Proportions"
+#| padding: 0px
+#| label: ORDERS & SHIPPING - BAR PLOT - DAYS TO SHIP BY ORDERS AND SHIP MODE
+
+ggplotly(sales |>
+  distinct(Order.ID, Days.to.Ship, Ship.Mode) |>
+  group_by(Days.to.Ship, Ship.Mode) |>
+  summarise(NumOrders = length(Order.ID)) |>
+  ggplot(aes(fill= Ship.Mode, y= NumOrders, x= Days.to.Ship)) +
+    coord_flip() +
+  geom_bar(position = "fill", stat = "identity") +
+  scale_fill_manual(values = c("#FDE33F", "#1E6CA8", "#3B0648", "#218581")) +
+  theme_minimal()
+)
+
+# scale_fill_viridis(discrete = T) 
+
+```
+
+
+### Column
+```{r}
+#| title: "Year over Year Orders Trend"
+#| padding: 0px
+#| label: LINE CHART - YOY ORDER NUMBERS GROWTH TREND
+
+sales |>
+  mutate(
+    Year = format(Order.Date, "%Y"),
+    Month = format(Order.Date, "%m")) |>
+  group_by(Year, Month) |>
+  summarise(NumOrders = length(unique(Order.ID))) |>
+  plot_ly(x= ~Month, y= ~NumOrders, color= ~Year, mode= "bar", colors = viridis_pal(option = "D")(4))
+
+```
+
+
+
+
+# Customer & Locations
+
+```{r}
+#| output: false
+#| label: EXPLORE CHUNK - CUSTOMERS & LOCATIONS
+
+# check Customer.ID and Customer.Name
+sum(is.na(sales$Customer.ID))
+sum(duplicated(sales$Customer.ID))
+TotalCustomers <- length(unique(sales$Customer.ID))
+# how about customer name?
+sum(is.na(sales$Customer.Name))
+sum(duplicated(sales$Customer.Name))
+length(unique(sales$Customer.Name))
+
+# explore Segment
+sum(is.na(sales$Segment))
+unique(sales$Segment)
+
+# Explore locations
+# Country
+sum(is.na(sales$Country))
+unique(sales$Country)
+# City
+sum(is.na(sales$City))
+NumCity <- length(unique(sales$City))
+# State
+sum(is.na(sales$State))
+unique(sales$State)
+NumState <- length(unique(sales$State))
+# Postal code
+sum(is.na(sales$Postal.Code))
+length(unique(sales$Postal.Code))
+# Region
+sum(is.na(sales$Region))
+unique(sales$Region)
+
+# Unique locations = 455
+nrow(sales |>
+  distinct(Country, City, State, Postal.Code, Region))
+
+# look at Customer + locations
+# some customers have multiple locations - there're 1,754 rows of Customers with locations
+sales |>
+  distinct(Customer.ID, Customer.Name, Country, City, State, Postal.Code, Region)
+
+# Avg number of orders per customer
+data <- sales |>
+  group_by(Customer.ID) |>
+  summarise(Num.Order = length(unique(Order.ID)))
+data
+AvgOrderCustomer <- mean(data$Num.Order)
+
+# Avg qty of products ordered per customer
+data <- sales |>
+  group_by(Customer.ID) |>
+  summarise(Qty.Product = sum(Quantity))
+data
+AvgProdCustomer <- mean(data$Qty.Product)
+
+################### make bar plot - Region w Sales
+data <- sales |>
+  mutate(
+    Year = format(Order.Date, "%Y")) |>
+  group_by(Year) |>
+  summarise(NumCustomer = length(unique(Customer.ID))) |>
+  arrange(Year) |>
+  mutate(PctChange = (NumCustomer - lag(NumCustomer))/lag(NumCustomer) * 100)
+#data$PctChange <- replace(data$PctChange, is.na(data$PctChange), 0)
+# CREATE PLOT - BAR + LINE
+#data$Year <- as.numeric(as.character(data$Year))
+#data <- data.frame(apply(data, 2, unclass))
+
+# create right scale - max of second axis / max of first
+scaleRight <- 23 / max(data$NumCustomer)
+
+# combine plots
+ggplot(data, aes(x= Year)) +
+  geom_col(aes(y= NumCustomer), fill= viridis(4)) +
+  geom_point(aes(y= PctChange / scaleRight)) +
+  geom_path(aes(y= PctChange / scaleRight), group= 1, colour= "orange", size= 0.9) +
+  scale_y_continuous(sec.axis = sec_axis(~.*scaleRight, name = "Percent (%)")) +
+  theme_minimal(base_size = 15)
+###################
+```
+
+
+## Row {.flow}
+
+```{r}
+#| content: valuebox
+#| title: "Total Customers"
+#| padding: 0px
+#| label: VALUE BOXES - CUSTOMERS & LOCATIONS 1
+
+list(
+  color= "success",
+  value= TotalCustomers
+)
+```
+```{r}
+#| content: valuebox
+#| title: "Locations: City"
+#| padding: 0px
+#| label: VALUE BOXES - CUSTOMERS & LOCATIONS 2
+
+list(
+  color= "teal",
+  value= NumCity
+)
+```
+```{r}
+#| content: valuebox
+#| title: "Locations: State"
+#| padding: 0px
+#| label: VALUE BOXES - CUSTOMERS & LOCATIONS 3
+
+list(
+  color= "primary",
+  value= NumState
+)
+```
+```{r}
+#| content: valuebox
+#| title: "Avg. Orders per Customer"
+#| padding: 0px
+#| label: VALUE BOXES - CUSTOMERS & LOCATIONS 4
+
+list(
+  color= "info",
+  value= round(AvgOrderCustomer)
+)
+```
+```{r}
+#| content: valuebox
+#| title: "Avg. Product Qty /Customer"
+#| padding: 0px
+#| label: VALUE BOXES - CUSTOMERS & LOCATIONS 5
+
+list(
+  color= "info",
+  value= round(AvgProdCustomer)
+)
+```
+
+## Row
+
+```{r}
+#| title: "Year over Year Customer Growth Trend"
+#| padding: 0px
+#| label: LINE CHART - YOY CUSTOMER NUMBER GROWTH TREND
+
+sales |>
+  mutate(
+    Year = format(Order.Date, "%Y"),
+    Month = format(Order.Date, "%m")) |>
+  group_by(Year, Month) |>
+  summarise(NumCustomer = length(unique(Customer.ID))) |>
+  plot_ly(x= ~Month, y= ~NumCustomer, color= ~Year, mode= "lines", type = "scatter")
+
+data <- sales |>
+  mutate(
+    Year = format(Order.Date, "%Y"),
+    Month = format(Order.Date, "%m")) |>
+  group_by(Year, Month) |>
+  summarise(NumCustomer = length(unique(Customer.ID)))
+
+```
+
+
+```{r}
+#| title: "Customer Segment by Number of Customer"
+#| padding: 0px
+#| message: false
+#| label: DONUT CHART - CUSTOMER SEGMENT
+# customer number by year grow chart
+# top value of customer by product qty sold
+
+sales |>
+  distinct(Customer.ID, Segment) |>
+  count(Segment) |>
+  plot_ly() |>
+  add_pie(labels = ~factor(Segment), values = ~n,
+          textinfo= "label+value+percent", type= "pie", 
+          hole= 0.6, marker= list(colors= viridis(3))
+          #textfont= list(size= 15)
+  )
+
+```
+
+
+## Row {height=55%}
+
+### Column
+```{r}
+#| title: "Quantity Sold, Discount, Profit, and Sales by Customer Segment"
+#| padding: 0px
+#| label: FACET BAR CHART - SALES BY CUSTOMER SEGMENT
+
+data <- sales|>
+  group_by(Segment) |>
+  summarise(
+    QtySold = sum(Quantity),
+    TotalSales = sum(Sales),
+    TotalDiscount = sum(Discount),
+    TotalProfit = sum(Profit)
+  ) |>
+  pivot_longer(
+    cols = QtySold: TotalProfit,
+    names_to = "ValueType",
+    values_to = "Value") |>
+  mutate(Value = round(Value))
+
+ggplotly(data |>
+  ggplot(aes(x= Segment, y= Value, fill= ValueType)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~ ValueType, scales = "free") +
+    scale_y_continuous(labels = comma) +
+  coord_flip() +
+  theme_minimal() +
+    scale_fill_viridis_d()
+)
+
+```
+
+### Column
+```{r}
+#| title: "Top Locations (zipcode) by Number of Customers"
+#| padding: 0px
+#| label: MAP LOCATIONS BY CUSTOMER COUNT
+
+# map by zipcode showing locations by customer count
+data <- sales |>
+  mutate(Postal.Code = str_pad(Postal.Code, pad = "0", side = "left", width= 5)) |>
+  distinct(Customer.ID, Postal.Code) |>
+  rename(zipcode = Postal.Code)
+# join data to get lat and long
+data_map <- left_join(data, zip_code_db, by = "zipcode") |>
+  select(Customer.ID, zipcode, lat, lng)
+# create map
+data_map |>
+  leaflet() |>
+  addTiles() |>
+  addCircleMarkers(lng = ~lng, lat = ~lat,
+             radius = ~Customer.ID, clusterOptions = markerClusterOptions())
+
+```
+
+
+# Products
+
+```{r}
+#| output: false
+#| label: EXPLORE CHUNK - PRODUCTS
+
+# explore products
+# Product.ID
+sum(is.na(sales$Product.ID))
+length(unique(sales$Product.ID))
+# Category
+sum(is.na(sales$Category))
+unique(sales$Category)
+# Sub.Category
+sum(is.na(sales$Sub.Category))
+unique(sales$Sub.Category)
+# Product.Name
+sum(is.na(sales$Product.Name))
+NumProduct <- length(unique(sales$Product.Name))
+# quantity sold
+NumProdSold <- sum(sales$Quantity)
+# Avg quantity sold / prod
+data <- sales |>
+  group_by(Product.ID) |>
+  summarise(QtySold = sum(Quantity))
+AvgQtyProdSold <- mean(data$QtySold)
+
+# check product name vs ID - looks like there're some products with the same IDs
+sales |>
+  distinct(Product.ID, Product.Name)
+# explore duplicates
+# on Product.ID
+sales |>
+  distinct(Product.ID, Product.Name) |>
+  get_dupes(Product.ID)
+# on Product.Name
+sales |>
+  distinct(Product.ID, Product.Name) |>
+  get_dupes(Product.Name)
+
+# how many furnitures sold? (quantity)
+sales |>
+  group_by(Category) |>
+  summarise(Quantity = sum(Quantity)) |>
+  gt() |>
+  fmt_integer(columns = Quantity, use_seps = TRUE)
+
+# Avg qty sold per month
+data <- sales |>
+  mutate(
+    year = format(Order.Date, "%Y"),
+    month = format(Order.Date, "%m")
+    ) |>
+  group_by(year, month) |>
+  summarise(Total.Qty = sum(Quantity))
+
+AvgMonthlyQtySold <- mean(data$Total.Qty)
+
+# Avg orders per year
+data <- sales |>
+  mutate(
+    year = format(Order.Date, "%Y")
+    ) |>
+  group_by(year) |>
+  summarise(Total.Qty = sum(Quantity))
+data
+AvgYearlyQtySold <- mean(data$Total.Qty)
+
+# Avg qty sold per day
+data <- sales |>
+  group_by(Order.Date) |>
+  summarise(Total.Qty = sum(Quantity))
+data
+AvgDailyQtySold <- mean(data$Total.Qty)
+
+# try bar plot - not using
+data <- sales |>
+  group_by(Sub.Category) |>
+  summarise(Quantity = sum(Quantity)) |>
+  arrange(desc(Quantity))
+data$fraction <- data$Quantity / sum(data$Quantity) # Compute percentages
+data$label <- paste0(format(data$Quantity, big.mark = ","), " (", round(data$fraction * 100, digits = 0), "%)") # Compute a good label
+ggplotly(data |>
+  ggplot(aes(x= reorder(Sub.Category, -Quantity), y= Quantity)) +
+  geom_col(fill= viridis(4)) +
+  geom_text(aes(x= Sub.Category, y= Quantity,label=label),vjust=1.5, color= "darkblue") +
+  theme_minimal() +
+  labs(title= "Add here")
+)
+
+# make bar plot - not using
+data <- sales |>
+  group_by(Product.Name) |>
+  summarise(Quantity = sum(Quantity)) |>
+  mutate(Product.Name = fct_reorder(Product.Name, Quantity, .desc = TRUE)) |>
+  top_n(10, Quantity)
+
+data |>
+  ggplot(aes(x= Quantity, y= Product.Name)) +
+  geom_col(fill= viridis(10)) +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.1))) +
+  scale_y_discrete(limits = rev) +
+  theme_ipsum() +
+  labs(title = "ADD HERE")
+```
+
+## Row {.flow}
+
+```{r}
+#| content: valuebox
+#| title: "Number of Products"
+#| padding: 0px
+#| label: VALUE BOXES - PRODUCTS 1
+
+list(
+  color= "success",
+  value= NumProduct
+)
+```
+```{r}
+#| content: valuebox
+#| title: "Quantity Sold"
+#| padding: 0px
+#| label: VALUE BOXES - PRODUCTS 2
+
+list(
+  color= "teal",
+  value= format(NumProdSold, big.mark = ",")
+)
+```
+```{r}
+#| content: valuebox
+#| title: "Avg Qty Sold /Product"
+#| padding: 0px
+#| label: VALUE BOXES - PRODUCTS 3
+
+list(
+  color= "primary",
+  value= round(AvgQtyProdSold)
+)
+```
+```{r}
+#| content: valuebox
+#| title: "Avg. Yearly Qty Sold"
+#| padding: 0px
+#| label: VALUE BOXES - PRODUCTS 4
+
+list(
+  color= "info",
+  value= format(AvgYearlyQtySold, big.mark = ",")
+)
+```
+```{r}
+#| content: valuebox
+#| title: "Avg. Monthly Qty Sold"
+#| padding: 0px
+#| label: VALUE BOXES - PRODUCTS 5
+
+list(
+  color= "info",
+  value= round(AvgMonthlyQtySold)
+)
+```
+```{r}
+#| content: valuebox
+#| title: "Avg. Daily Qty Sold"
+#| padding: 0px
+#| label: VALUE BOXES - PRODUCTS 6
+
+list(
+  color= "info",
+  value= round(AvgDailyQtySold)
+)
+```
+
+## Row
+
+### Column
+
+```{r}
+#| title: "Quantity Sold by Product Category"
+#| padding: 0px
+#| label: PRODUCT - DONUT PLOT
+
+# make donut plot - Sub.Category w Quantity
+sales |>
+  group_by(Sub.Category) |>
+  summarise(Quantity = sum(Quantity)) |>
+  arrange(desc(Quantity)) |>
+  plot_ly() |>
+  add_pie(labels = ~factor(Sub.Category), values = ~Quantity,
+          textinfo= "label+value+percent", type= "pie", 
+          texttemplate= "%{label} <br> %{value:,.0f} <br> %{percent}",
+          hole= 0.6, marker= list(colors= viridis(3))
+          #textfont= list(size= 15)
+  )
+
+
+```
+
+### Column {.tabset}
+
+```{r}
+#| title: "Top 10 Most Sold Products by Qty"
+#| padding: 1px
+#| label: PRODUCTS TABLE - TOP 10
+# 10 Top Product.Name by quantity sold:
+knitr::kable(sales |>
+  group_by(Product.Name) |>
+  summarise(Quantity = sum(Quantity)) |>
+  arrange(desc(Quantity)) |>
+  top_n(10, Quantity)
+)
+```
+
+```{r}
+#| title: "Bottom 10 Least Sold Products by Qty"
+#| padding: 1px
+#| label: PRODUCTS TABLE - BOTTOM 10
+
+# 10 Least Sold Products by Quantity:
+knitr::kable(sales |>
+  group_by(Product.Name) |>
+  summarise(Quantity = sum(Quantity)) |>
+  arrange(Quantity) |>
+  top_n(-10, Quantity) |>
+    head(10)
+)
+```
+
+## Row
+
+```{r}
+#| title: "Sales, Profit, and Discount by Product Category"
+#| padding: 0px
+#| label: PRODUCT - FACET BAR PLOT
+
+data <- sales|>
+  group_by(Sub.Category) |>
+  summarise(
+    TotalSales = sum(Sales),
+    TotalDiscount = sum(Discount),
+    TotalProfit = sum(Profit)
+  ) |>
+  pivot_longer(
+    cols = TotalSales: TotalProfit,
+    names_to = "ValueType",
+    values_to = "Value") |>
+  mutate(Value = round(Value))
+
+ggplotly(data |>
+  ggplot(aes(x= Sub.Category, y= Value, fill= ValueType)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~ ValueType, scales = "free", nrow = 3) +
+    scale_y_continuous(labels = comma) +
+  coord_flip() +
+  theme_minimal()
+)
+
+```
+
+```{r}
+#| title: "Year over Year Quantity of Product Sold"
+#| padding: 0px
+#| label: PRODUCT - BAR PLOT - YOY QUANTITY SOLD
+
+sales |>
+  mutate(
+    Year = format(Order.Date, "%Y"),
+    Month = format(Order.Date, "%m")) |>
+  group_by(Year, Month) |>
+  summarise(QtySold = sum(Quantity)) |>
+  plot_ly(x= ~Month, y= ~QtySold, color= ~Year, mode= "bar", colors = viridis_pal(option = "D")(4))
+```
+
+
+# Analysis Summary {orientation="columns" scrolling="true"}
+
+## Column
+
+### Row {.flow}
+::: {.card}
+::: card-header
+Products:
+:::
+::: card-body
+
+* The store had 380 furniture products (by Product Name) for sale during the period. (Note: 375 product count by Product ID. There are 16 products that shared the same ID and 3 products that have two different IDs each).
+
+* The products are categorized into 4 types: 1) Bookcases 2) Chairs 3) Tables and 4) Furnishings.
+
+* The total quantity of product sold was 8,028 items. Average quantity sold per product is 21 items. Average quantity sold per year is 2,007 items, 167 items /month, and 9 items /day.
+
+* Number of quantities sold shows an increasing trend over years from 1,623 items in 2014 items to 2,437 in 2017. Monthly trend also appears similarly each year with increasing trend starting lowest products sold at the beginning of the year and highest at the end of the year with a couple of drops around August and October month.
+```{r}
+#| padding: 0px
+sales |>
+  mutate(
+    year = format(Order.Date, "%Y")
+    ) |>
+  group_by(year) |>
+  summarise(Total.Qty = sum(Quantity)) |>
+  mutate(pct_change = round((Total.Qty - lag(Total.Qty))/lag(Total.Qty) * 100)) |>
+  knitr::kable(digits = 1, format.args = list(big.mark = ","))
+
+```
+
+* Furnishing products were the most sold in quantity (3,563 /44%); bookcases were the least sold in quantity (868 /11%).
+```{r}
+#| padding: 0px
+# quantity sold by Sub.Category:
+sales |>
+  group_by(Sub.Category) |>
+  summarise(Quantity = sum(Quantity)) |>
+  mutate(Percent = round(Quantity / sum(Quantity) *100, 1)) |>
+  arrange(desc(Quantity)) |>
+  adorn_totals() |>
+  knitr::kable(digits = 0, format.args = list(big.mark = ","))
+```
+* Chairs product produced the highest revenue both in sales ($328,449 /44%) and profit ($26,590 /144%). Tables and bookcases made the sales however were negative in profit after the costs. Furnishing products were the highest in discount.
+```{r}
+#| padding: 0px
+sales|>
+  group_by(Sub.Category) |>
+  summarise(
+    TotalSales = round(sum(Sales)),
+    TotalDiscount = round(sum(Discount)),
+    TotalProfit = round(sum(Profit))
+  ) |>
+  ungroup() |>
+  mutate(
+    PctSales = round(TotalSales / sum(TotalSales) * 100),
+    PctDiscount = round(TotalDiscount / sum(TotalDiscount) * 100),
+    PctProfit = round(TotalProfit / sum(TotalProfit) * 100),
+    ) |>
+  knitr::kable(digits = 1, format.args = list(big.mark = ","))
+```
+* KI Adjustable-Height Table was the most sold product in quantity (74). Bush Saratoga Collection 5-Shelf Bookcase, Hanover Cherry, Special Order and Global Enterprise Series Seating Low-Back Swivel/Tilt Chairs were the least sold in quantity (1).
+
+:::
+:::
+
+### Row {.flow}
+::: {.card}
+::: card-header
+Orders & Shipping:
+:::
+::: card-body
+* The store total number is 1,764. Average order per year is 441, 37 orders per month, and 2 orders per day.
+
+* There were 4 shipping modes offered to customers: 1) Same Day 2) First Class 3) Second Class and 4) Standard Class. Most customers opted their order shipment using Standard Class (59%) and only 5% of the orders got shipped using the same day option. 
+```{r}
+# count % - Ship.Mode
+Orders.Shipping |>
+  tabyl(Ship.Mode) |>
+  adorn_totals() |>
+  mutate(percent = round(percent * 100)) |>
+  knitr::kable(digits = 1, format.args = list(big.mark = ","))
+```
+
+* The store could take from 0 to 7 days to ship the orders with an average of 4 days. Standard Class most likely took 4-6 days; Second Class 2 up to 5 days; First Class 1-3 days; and Same Day mostly likely within the day with small cases that would be the next day.
+```{r}
+#| padding: 0px
+# count Days.to.Ship
+Orders.Shipping |>
+  tabyl(Days.to.Ship) |>
+  adorn_totals() |>
+  mutate(percent = round(percent * 100)) |>
+  knitr::kable(digits = 1, format.args = list(big.mark = ","))
+```
+
+* Order numbers trend has similar increasing trend over the years as the product quantity sold and customer trend with the trend starting lowest at the beginning of the year and highest at the end of the year with a couple of drops around August and October month.
+```{r}
+#| padding: 0px
+sales |>
+  mutate(
+    year = format(Order.Date, "%Y")
+    ) |>
+  group_by(year) |>
+  summarise(NumOrders = length(unique(Order.ID))) |>
+  mutate(pct_change = round((NumOrders - lag(NumOrders))/lag(NumOrders) * 100)) |>
+  knitr::kable(digits = 1, format.args = list(big.mark = ","))
+
+```
+
+:::
+:::
+
+
+## Column
+
+### Row {.flow}
+::: {.card}
+::: card-header
+Customer & Locations:
+:::
+::: card-body
+* The store had 707 customers in total over the years. The customers are categorized into 3 segments: 1) Consumer 2) Home office and 3) Corporate. Consumer is the largest segment having 52% of the customers in the group. The rest are 18% in home office and 30% in corporate.
+```{r}
+#| padding: 0px
+# how many (unique) customers in each segment?
+sales |>
+  distinct(Customer.ID, Segment) |>
+  tabyl(Segment) |>
+  adorn_totals() |>
+  mutate(percent = round(percent * 100)) |>
+  knitr::kable(digits = 1, format.args = list(big.mark = ","))
+```
+* Consumer segment generated the highest overall in sales ($391,049 /53%), products quantity sold (4,166 /52%), and got more discount than other segments. However, the store gained slightly more in profit from the corporate segment ($7,585 /41%) comparing to the consumer segment (6,991 /38%). Home office was the smallest segment and generated the least revenues overall.
+```{r}
+#| padding: 0px
+sales|>
+  group_by(Segment) |>
+  summarise(
+    QtySold = round(sum(Quantity)),
+    TotalSales = round(sum(Sales)),
+    TotalDiscount = round(sum(Discount)),
+    TotalProfit = round(sum(Profit))
+  ) |>
+  ungroup() |>
+  mutate(
+    PctQtySold = round(QtySold / sum(QtySold) * 100),
+    PctSales = round(TotalSales / sum(TotalSales) * 100),
+    PctDiscount = round(TotalDiscount / sum(TotalDiscount) * 100),
+    PctProfit = round(TotalProfit / sum(TotalProfit) * 100),
+    ) |>
+  knitr::kable(digits = 1, format.args = list(big.mark = ","))
+```
+* The customers were in different locations in the U.S. (4 regions, 48 states, 371 cities, and 454 zip codes based on the locations the products were shipped to). There were more shipments to customers in the west (31%) particularly in California (19%). New York City, however, had the highest number of customers (28%) at the city level.
+```{r}
+#| padding: 0px
+# by Region
+sales |>
+  distinct(Customer.ID, Region) |>
+  tabyl(Region) |>
+  arrange(desc(n)) |>
+  mutate(percent = round(percent * 100)) |>
+  knitr::kable(digits = 1, format.args = list(big.mark = ","))
+
+# by State
+sales |>
+  distinct(Customer.ID, State) |>
+  tabyl(State) |>
+  arrange(desc(n)) |>
+  top_n(5, n) |>
+  mutate(percent = round(percent * 100)) |>
+  knitr::kable(digits = 1, format.args = list(big.mark = ","))
+
+# by specific city + state
+sales |>
+  distinct(Customer.ID, City, State) |>
+  count(City, State) |>
+  arrange(desc(n)) |>
+  top_n(5, n) |>
+  mutate(Percent = round(n / sum(n) *100, 0)) |>
+  rename(Count = n) |>
+  knitr::kable(digits = 1, format.args = list(big.mark = ","))
+
+```
+* Customer growth trend has similar increasing trend over the years as the product quantity sold trend with the trend starting lowest at the beginning of the year and highest at the end of the year with a couple of drops around August and October month.
+```{r}
+#| padding: 0px
+sales |>
+  mutate(
+    year = format(Order.Date, "%Y")
+    ) |>
+  group_by(year) |>
+  summarise(NumCustomer = length(unique(Customer.ID))) |>
+  mutate(pct_change = round((NumCustomer - lag(NumCustomer))/lag(NumCustomer) * 100)) |>
+  knitr::kable(digits = 1, format.args = list(big.mark = ","))
+
+```
+:::
+:::
+
+### Row {.flow}
+
+::: {.card}
+::: card-header
+Sales & Profit:
+:::
+::: card-body
+* The store total sales were $742,000, total profit was $18,451 with profit margin of 2.5%, and $369 in total discount. An average sale per order was $421, $1,050 per customer, and $1,953 per product.
+
+* There were higher sales ($252,613 /34%) and profit ($11,505) in the west region. South region was the lowest in sales ($117,299 /16%). Central region was negative in profit (-$2,871). At the state level, California had the highest in sales ($156,065) and profit ($9,163); there was a lost in profit in Texas (-$10,436) and Pennsylvania (-$7,197). On the city level, New York City was highest in sales ($75,691); Seattle was higher in profit ($6,209); and there was a negative in profit in Philadelphia (-$6,827) and Houston (-$3,405).
+```{r}
+#| padding: 0px
+# by Region
+sales |>
+  group_by(Region) |>
+  summarise(TotalSales = sum(Sales),
+            TotalProfit = sum(Profit)) |>
+  arrange(desc(TotalSales)) |>
+  knitr::kable(digits = 0, format.args = list(big.mark = ","))
+
+# by State
+sales |>
+  group_by(State) |>
+  summarise(TotalSales = sum(Sales),
+            TotalProfit = sum(Profit)) |>
+  arrange(desc(TotalSales)) |>
+  top_n(5, TotalSales) |>
+  knitr::kable(digits = 0, format.args = list(big.mark = ","))
+
+# by specific city + state
+data <- head(sales |>
+  group_by(City, State) |>
+  summarise(TotalSales = sum(Sales),
+            TotalProfit = sum(Profit)) |>
+  arrange(desc(TotalSales)) |>
+  top_n(5, TotalSales))
+
+knitr::kable(data, digits = 0, format.args = list(big.mark = ","))
+
+```
+
+* The store sales trend has increasing trend over the years with the trend starting lowest at the beginning of the year and highest at the end of the year with a couple of drops around August and October month. The overall profit was mostly on the positive side throughout the years; however, the profit trend doesn’t appear to follow the same increasing trend as sales with major drops in profit in 2015 (-45%) and 2017 (-57%). Profit margin decreased to lowest at 1% in 2017.
+```{r}
+# Sales summaries table
+sales |>
+  mutate(Year = format(Order.Date, "%Y")) |>
+  group_by(Year) |>
+  summarise(
+    TotalSales = sum(Sales),
+    TotalProfit= sum(Profit),
+    TotalDiscount= sum(Discount),
+    Avg.Sales = mean(Sales),
+    Avg.Profit = mean(Profit)) |>
+  mutate(pctChangeSales = round((TotalSales - lag(TotalSales))/lag(TotalSales) * 100),
+         pctChangeProfit = round((TotalProfit - lag(TotalProfit))/lag(TotalProfit) * 100),
+         ProfMarginPct = TotalProfit / TotalSales * 100) |>
+  knitr::kable(digits = 0, format.args = list(big.mark = ","))
+
+```
+
+
+* Seth Vernon was the store’s top customer who made the biggest purchase by total sales ($8,332). HON 5400 Series Task Chairs for Big and Tall was the top product that generated the most sales in total of $21,871.
+
+:::
+:::
+
+# About
+
+## Row {.flow}
+
+### Column {width=45%}
+
+::: {.card}
+::: card-header
+About the data
+:::
+This dashboard is based on Store Sales Forecasting Data from Kaggle [https://www.kaggle.com/datasets/tanayatipre/store-sales-forecasting-dataset/data](https://www.kaggle.com/datasets/tanayatipre/store-sales-forecasting-dataset/data). The dataset is a collection of a retail furniture store’s historical sales data during its 4-year operating period from 2014-01-06 to 2017-12-30 containing 2,121 observations and 21 variables including the store’s orders, shipping, customers, locations, products, sales, and profit information.
+
+The **objective** of this dashboard is to gain insights from the store’s historical operations and sales patterns and to report by visualizing the key information that allows the users to track and analyze for making better informed business decisions.
+:::
+
+### Column {width=55%}
+```{r}
+#| label: ABOUT - DATA TABLE
+#| title: Data Structure
+#| padding: 0px
+data_show <- read.csv("data/store_sales.csv")
+glimpse(data_show)
+```
