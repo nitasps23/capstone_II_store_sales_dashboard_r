@@ -5,7 +5,6 @@ format:
   dashboard:
     theme: yeti
     embed-resources: true
-    self-contained-math: true
 execute: 
   echo: false
 ---
