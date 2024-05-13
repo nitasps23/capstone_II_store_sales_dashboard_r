@@ -4,6 +4,8 @@ author: "Nita Sokphoodsa"
 format:
   dashboard:
     theme: yeti
+    hmtl:
+      embed-resources: true
 execute: 
   echo: false
 editor: visual
