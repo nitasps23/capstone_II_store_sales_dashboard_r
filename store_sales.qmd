@@ -4,9 +4,9 @@ author: "Nita Sokphoodsa"
 format:
   dashboard:
     theme: yeti
-    hmtl:
-      embed-resources: true
-      code-background: true
+  html:
+    embed-resources: true
+    code: true
 execute: 
   echo: false
 editor: visual
