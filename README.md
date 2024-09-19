@@ -1,4 +1,4 @@
-### Here is the link to Store Sales Dashboard:
+### Link to Store Sales Dashboard:
 > https://rpubs.com/tnitasps23/1184360
 
 ### Store Sales Dashboard (R+Quarto):
